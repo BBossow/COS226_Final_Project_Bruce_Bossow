@@ -1,4 +1,7 @@
+# This is where btree is controlled
+
 from b_tree import BTree
+from quicksort import QuickSort
 
 class BTreeIndex:
     def __init__(self, field):
@@ -15,8 +18,11 @@ class BTreeIndex:
             return item.rating
         elif self.field == "min_duration":
             return item.min_duration
+
         
-    
+    def build(self, records):
+        sortedItems = QuickSort.quickSort(records, self.field)
+        self.tree.bulk_load(sortedItems)
 
     # Uses btree remove function to remove values.
     def delete(self, item):
