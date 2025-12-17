@@ -1,8 +1,9 @@
 
 class Tree:
-    def __init__(self, maxdegree):
+    def __init__(self, maxdegree, field):
         self.root = None # reference to the root node
         self.maxdegree = maxdegree # the number of keys that will cause a split
+        self.field = field
 
 class DataItem:
     def __init__(self, key, value):
@@ -36,29 +37,6 @@ class Bucket:
 
 class BucketNode(Bucket):
 
- 
-    def add(self, item, leftLink = None):
-        # bucket add
-        # find the correct spot for DataItem in the bucket
-        # insert DataItem in correct spot
-        if self.is_leaf: #leaf bucket
-            targetIndex = 0
-            for itemData in self.keys:
-                if item.key < itemData.key:
-                    break
-                targetIndex += 1
-            self.keys.insert(targetIndex, item)
-            return len(self.keys)
-        else: # internal bucket, called when split
-            target = 0
-            for key in self.keys:
-                if item.key < key.key:
-                    break
-                target += 1
-            self.keys.insert(target, item)
-            self.links.insert(target, leftLink)
-            return (len(self.keys))
-
     def remove(self, remove_key):
         # bucket remove
         # find the DataItem in .keys that matches "key"
@@ -78,28 +56,84 @@ class BucketNode(Bucket):
                 return del_node
             else:
                 return -1
+class LeafNode:
+    
+    def __init__(self, maxdegree):
+        self.keys = []          # list of IndexItem
+        self.next = None        # pointer to next leaf
+        self.prev = None        # pointer to previous leaf
+        self.maxdegree = maxdegree
+
+class InternalNode:
+    
+    def __init__(self, maxdegree):
+        self.keys = []          # separator keys
+        self.links = []         # child pointers
+        self.maxdegree = maxdegree
 
 class BTree(Tree):
     # goes through the tree to find the correct leaf bucket for the add
-    def add(self, key, value):
-        data = DataItem(key, value)
-        if (self.root == None): # if there is no root (first add)
-            self.root = BucketNode(self.maxdegree)
-            self.root.is_leaf = True
-            self.root.keys.append(data)
+    def get_value(self, item):
+        if self.field == "release_date":
+            return item.release_date
+        elif self.field == "revenue":
+            return item.revenue
+        elif self.field == "rating":
+            return item.rating
+        elif self.field == "min_duration":
+            return item.min_duration
+        
+    def bulk_load(self, records):
+
+        if len(records) == 0:
             return
-        else: 
-            curBucket = self.root
-            while (curBucket.is_leaf == False): #curBucket is internal
-                targetLink = 0
-                for bucket_key in curBucket.keys:
-                    if data.key < bucket_key.key:
-                        break
-                    targetLink += 1
-                curBucket = curBucket.links[targetLink]
-            size = curBucket.add(data)
-            if (size >= self.maxdegree):
-                self.leaf_split(curBucket)
+
+        leaves = []
+        i = 0
+
+        # creating the leaf nodes and bulking loading them
+        while i < len(records):
+            leaf = LeafNode(self.maxdegree)
+
+            while len(leaf.keys) < self.maxdegree - 1 and i < len(records):
+                key = self.get_value(records[i])  # INDEX FIELD
+                item = DataItem(key, records[i])
+                leaf.keys.append(item)
+
+                i += 1
+
+            leaves.append(leaf)
+        
+        # This is for linking the leaf nodes
+        for i in range(len(leaves) - 1):
+            leaves[i].next = leaves[i + 1]
+            leaves[i + 1].prev = leaves[i]
+
+        # creating the internal nodes
+        self.root = self.build_internal(leaves)
+
+    def build_internal(self, nodes):
+
+        #builds internal nodes
+        if len(nodes) == 1:
+            return nodes[0]
+
+        parents = []
+        i = 0
+
+        while i < len(nodes):
+            parent = InternalNode(self.maxdegree)
+            children = nodes[i:i + self.maxdegree]
+            parent.links = children
+
+            # parent keys from come the first key from each child node besides the first one
+            for child in children[1:]:
+                parent.keys.append(child.keys[0].key)
+
+            parents.append(parent)
+            i += self.maxdegree
+
+        return self.build_internal(parents)
 
 
     def remove(self, key):
@@ -209,56 +243,6 @@ class BTree(Tree):
             return node.next.keys[0].key
         else:
             return None
-
-        #when maxdegree is reached in a leaf node, a leaf split occurs, creates a new node
-    def leaf_split(self, node):
-        newLeft = BucketNode(self.maxdegree)
-        middleIndex = self.maxdegree//2
-        newLeft.keys = node.keys[:middleIndex]
-        node.keys = node.keys[middleIndex:]
-        if node.prev != None: #if a right leaf node splits, fixes connections
-            node.prev.next = newLeft
-            newLeft.prev = node.prev
-        newLeft.next = node
-        node.prev = newLeft
-        if (node.parent == None):
-            self.root = BucketNode(self.maxdegree)
-            self.root.is_leaf = False
-            node.parent = self.root
-            newLeft.parent = self.root
-            self.root.keys = [node.keys[0]]
-            self.root.links = [newLeft, node]
-            return
-        newLeft.parent = node.parent # fix parent
-        split = node.parent.add(node.keys[0], newLeft)
-        if (split >= self.maxdegree):
-            self.internal_split(node.parent)
-
-        # when maxdegree is reached in a internal node, a internal split occurs, creates a new node
-    def internal_split(self, node):
-        leftNode = BucketNode(self.maxdegree)
-        leftNode.is_leaf = False
-        middle = self.maxdegree//2
-        leftNode.keys = node.keys[:middle]
-        store = node.keys[middle]
-        node.keys = node.keys[middle + 1:]
-        leftNode.links = node.links[:middle + 1]
-        node.links = node.links[middle + 1:]
-        for i in leftNode.links:
-            i.parent = leftNode
-        if node.parent == None:
-            self.root = BucketNode(self.maxdegree) 
-            self.root.is_leaf = False
-            self.root.keys = [store]
-            self.root.links = [leftNode, node]
-            leftNode.parent = self.root
-            node.parent = self.root
-            return
-        if leftNode.parent == None:
-            leftNode.parent = node.parent
-        split = node.parent.add(store, leftNode)
-        if (split >= self.maxdegree):
-            self.internal_split(node.parent)
 
     # is the merge leaf function for when the node size is too small and a steal cannot happen
     def merge_leaf(self, leftNode, rightNode):

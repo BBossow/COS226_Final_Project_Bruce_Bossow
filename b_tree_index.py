@@ -22,7 +22,7 @@ class BTreeIndex:
         
     def build(self, records):
         sortedItems = QuickSort.quickSort(records, self.field)
-        self.tree.bulk_load(sortedItems)
+        self.tree.bulk_load(sortedItems, self.field)
 
     # Uses btree remove function to remove values.
     def delete(self, item):
