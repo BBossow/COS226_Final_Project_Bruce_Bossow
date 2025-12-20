@@ -60,16 +60,27 @@ class LeafNode:
     
     def __init__(self, maxdegree):
         self.keys = []          # list of IndexItem
+        self.is_leaf = True
         self.next = None        # pointer to next leaf
         self.prev = None        # pointer to previous leaf
         self.maxdegree = maxdegree
 
+    def remove(self, key):
+        i = 0
+        while i < len(self.keys):
+            if self.keys[i].key == key:
+                return self.keys.pop(i)  
+            i += 1
+        return -1
+
 class InternalNode:
     
     def __init__(self, maxdegree):
+        self.is_leaf = False
         self.keys = []          # separator keys
         self.links = []         # child pointers
         self.maxdegree = maxdegree
+        self.parent = None
 
 class BTree(Tree):
     # goes through the tree to find the correct leaf bucket for the add
@@ -83,6 +94,30 @@ class BTree(Tree):
         elif self.field == "min_duration":
             return item.min_duration
         
+    def range_search(self, low=None, high=None):
+        
+        if self.root is None:
+            return []
+
+        results = []
+
+        #Traverses to the first leaf node that could contain 'low'
+        node = self.root
+        while not node.is_leaf:
+            node = node.links[0]
+
+        #Traverse leaf nodes sequentially
+        while node:
+            for item in node.keys:  # item is a DataItem
+                key = item.key
+
+                if (low is None or key >= low) and (high is None or key <= high):
+                    results.append(item.value)
+
+            node = node.next
+
+        return results
+    
     def bulk_load(self, records):
 
         if len(records) == 0:
@@ -113,8 +148,7 @@ class BTree(Tree):
         self.root = self.build_internal(leaves)
 
     def build_internal(self, nodes):
-
-        #builds internal nodes
+        # builds internal nodes
         if len(nodes) == 1:
             return nodes[0]
 
@@ -126,54 +160,85 @@ class BTree(Tree):
             children = nodes[i:i + self.maxdegree]
             parent.links = children
 
-            # parent keys from come the first key from each child node besides the first one
+            # set parent reference for child nodes
+            for child in children:
+                child.parent = parent
+
+            # append keys for parent (skip empty children)
             for child in children[1:]:
-                parent.keys.append(child.keys[0].key)
+                if len(child.keys) == 0:
+                    continue  # skip empty child keys
+
+                # if leaf node, take DataItem.key
+                if 'next' in child.__dict__:
+                    first_key = child.keys[0].key
+                else:  # internal node, keys are already raw numbers
+                    first_key = child.keys[0]
+                parent.keys.append(first_key)
 
             parents.append(parent)
             i += self.maxdegree
 
+        # recursively build higher levels
         return self.build_internal(parents)
 
 
     def remove(self, key):
-        # find the correct bucket based on the key
         curBucket = self.root
-        memory = None #bucket where we find the key early
-        memory_index = 0 # which index in the memory bucket
+        memory = None  # for updating parent keys if needed
+        memory_index = 0
 
+        # Traverse internal nodes to find the correct leaf
+        while not curBucket.is_leaf:
+            targetLink = 0
+            for bucket_key in curBucket.keys:
+                # if bucket_key is a DataItem, get its .key; otherwise use directly
+                if isinstance(bucket_key, DataItem):
+                    compare_key = bucket_key.key
+                else:
+                    compare_key = bucket_key
 
-        while (curBucket.is_leaf == False): # searching for the correct bucket
-                targetLink = 0
-                for bucket_key in curBucket.keys:
-                    if bucket_key.key == key:
-                        memory = curBucket
-                        memory_index = targetLink
-                    if key < bucket_key.key:
-                        break
-                    targetLink += 1
-                if targetLink >= len(curBucket.links):
-                    targetLink -= 1
-                curBucket = curBucket.links[targetLink]
+                if key < compare_key:
+                    break
+                targetLink += 1
 
-        # curBucket is the correct leaf where "key" *might* exist
-        remove = curBucket.remove(key)
+            # Clamp targetLink to valid range
+            if targetLink >= len(curBucket.links):
+                targetLink = len(curBucket.links) - 1
 
-        if memory != None:
-            #fix the memory node
-            next_key = self.find_next_key(curBucket)
-            if next_key != None:
-                memory.keys[memory_index].key = next_key
+            # Track memory for updating parent keys if needed
+            if targetLink < len(curBucket.keys):
+                bk = curBucket.keys[targetLink]
+                bk_value = bk.key if isinstance(bk, DataItem) else bk
+                if key == bk_value:
+                    memory = curBucket
+                    memory_index = targetLink
 
-        if remove != -1:
-            # it found something
-            #check if bucket is too small
-            if len(curBucket.keys) < ((self.maxdegree - 1) // 2):
-                self.fix_leaf_bucket(curBucket) # fix the leaf bucket
-            return f"Found {key} and removed {remove.value}"
-        else:
-            # didn't find the remove key, let the outside world know
+            curBucket = curBucket.links[targetLink]
+
+        # Now curBucket is the correct leaf
+        removed = None
+        i = 0
+        while i < len(curBucket.keys):
+            if curBucket.keys[i].key == key:
+                removed = curBucket.keys.pop(i)
+                break
+            i += 1
+
+        if removed is None:
             return f"Did not find {key}"
+
+        # Update parent key if needed
+        if memory is not None:
+            next_key = self.find_next_key(curBucket)
+            if next_key is not None:
+                memory.keys[memory_index] = next_key
+
+        # Fix leaf if it is too small
+        if len(curBucket.keys) < ((self.maxdegree - 1) // 2):
+            self.fix_leaf_bucket(curBucket)
+
+        return f"Found {key} and removed {removed.value}"
     
     def fix_leaf_bucket(self, node):
         # the leaf node is too small
@@ -246,23 +311,32 @@ class BTree(Tree):
 
     # is the merge leaf function for when the node size is too small and a steal cannot happen
     def merge_leaf(self, leftNode, rightNode):
-        # take everything in the rightNode, and stuff it into the left node
-
         leftNode.keys.extend(rightNode.keys)
+
+        parent = leftNode.parent
+        # find index of leftNode in parent.links
         target = 0
-        for link in leftNode.parent.links:
+        for link in parent.links:
             if link == leftNode:
                 break
             target += 1
-        # now target is the index where leftNode is.
-        leftNode.parent.keys.pop(target)
-        leftNode.parent.links.pop(target + 1)
-        leftNode.next = rightNode.next # fix the next prev connections
+
+        # remove parent key safely
+        if target > 0 and target - 1 < len(parent.keys):
+            parent.keys.pop(target - 1)
+
+        # remove rightNode from parent.links safely
+        if target + 1 < len(parent.links):
+            parent.links.pop(target + 1)
+
+        # fix leaf chain
+        leftNode.next = rightNode.next
         if leftNode.next:
             leftNode.next.prev = leftNode
-            #check if bucket is too small
-        if (len(leftNode.parent.keys)) < ((self.maxdegree-1)//2):
-                self.fix_internal_bucket(leftNode.parent) # fix the internal bucket
+
+        # check parent minimum size
+        if len(parent.keys) < ((self.maxdegree - 1) // 2):
+            self.fix_internal_bucket(parent)
 
     # checks to see if a steal is possible
     def isValidSteal(self, node):
@@ -300,36 +374,36 @@ class BTree(Tree):
     
     # is the function to steal from another leaf node, when the node is too small
     def steal_leaf(self, node, direction):
-        if node.parent == None:
+        if node.parent is None:
             return
-        
-        if direction == "left": # stealing from the left
-            target = 0
-            for link in node.parent.links:
-                if link == node:
-                    break
-                target += 1
-            # now target = link to node
 
-            left_node = node.parent.links[target-1] # left sibling that we steal from
+        # find target index of node in parent.links
+        target = 0
+        for link in node.parent.links:
+            if link == node:
+                break
+            target += 1
 
-            
-            node.parent.keys[target-1] = left_node.keys[-1]
+        if direction == "left":  # stealing from the left
+            left_node = node.parent.links[target - 1]
+            if len(left_node.keys) == 0:
+                return  # nothing to steal
+
+            # only update parent key if target > 0
+            if target > 0 and len(node.parent.keys) >= target:
+                node.parent.keys[target - 1] = left_node.keys[-1]
+
             node.keys.insert(0, left_node.keys.pop(-1))
 
-        else: 
+        else:  # stealing from the right
+            right_node = node.parent.links[target + 1]
+            if len(right_node.keys) == 0:
+                return  # nothing to steal
 
-            target = 0
-            for link in node.parent.links:
-                if link == node:
-                    break
-                target += 1
-            # now target = link to node
-
-            right_node = node.parent.links[target+1] # right sibling that we steal from
+            if len(node.parent.keys) > target:
+                node.parent.keys[target] = right_node.keys[0]
 
             node.keys.append(right_node.keys.pop(0))
-            node.parent.keys[target] = right_node.keys[0]
     
     # is the function to steal from another internal node, when the node is too small
     def steal_internal(self, node, direction):

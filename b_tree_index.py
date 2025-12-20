@@ -6,7 +6,7 @@ from quicksort import QuickSort
 class BTreeIndex:
     def __init__(self, field):
         self.field = field
-        self.tree = BTree(maxdegree = 5)
+        self.tree = BTree(5, field)
 
     # Index fields, any input that is an int/float
     def get_value(self, item):
@@ -21,8 +21,12 @@ class BTreeIndex:
 
         
     def build(self, records):
-        sortedItems = QuickSort.quickSort(records, self.field)
-        self.tree.bulk_load(sortedItems, self.field)
+        sorter = QuickSort()
+        sortedItems = sorter.quickSort(records, self.field)
+        self.tree.bulk_load(sortedItems)
+
+    def range_search(self, low, high):
+        return self.tree.range_search(low, high)
 
     # Uses btree remove function to remove values.
     def delete(self, item):

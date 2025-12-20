@@ -29,6 +29,26 @@ class Database:
         index.build(self.records)
         self.btree_indexes[field] = index
 
+    def print_index(self):
+        for index in self.btree_indexes:
+            print(index)
+
     def exact_search(self, field, value):
         self.last_results = self.hash_tables[field].search(value)
         return self.last_results
+    
+    def range_search(self, field, low, high):
+        if field not in self.btree_indexes:
+            print("Field not indexed")
+            return []
+        self.last_results = self.btree_indexes[field].range_search(low, high)
+        return self.last_results
+
+    def delete_results(self):
+        for item in self.last_results:
+            self.records.remove(item)
+            for table in self.hash_tables.values():
+                table.delete(item)
+            for index in self.btree_indexes.values():
+                index.delete(item)
+        self.last_results = []

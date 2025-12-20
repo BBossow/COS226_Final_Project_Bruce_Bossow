@@ -21,11 +21,11 @@ class QuickSort:
         #print(f"Start: {start}, End: {end}")
         #print(x)
         if len(x) == 0: # handles if there is no list
-            return
+            return x
         if end == -1: # handles the situation where the list is just one
             end = len(x)-1
         if end-start <= 0: # too small, stop
-            return
+            return x
         
         #leftEnd, rightStart = naivePartition(x, start, end)
         #leftEnd, rightStart = lomutoPartition(x, start, end)
@@ -33,6 +33,7 @@ class QuickSort:
         #print(f"leftEnd = {leftEnd}, rightStart = {rightStart}")
         self.quickSort(x, field, start, leftEnd)
         self.quickSort(x, field, rightStart, end)
+        return x
 
     def hoarePartition(self, x, start, end):
 
